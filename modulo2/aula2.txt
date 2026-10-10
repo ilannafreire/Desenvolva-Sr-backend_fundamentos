@@ -1,0 +1,54 @@
+RESILIÊNCIA EM PROCESSAMENTOS DE PAGAMENTO
+=========================================
+
+1. TIMEOUT DURANTE UMA TENTATIVA DE COBRANÇA
+--------------------------------------------
+
+Pergunta: “E se der timeout no retry, cobramos o cliente duas vezes?”
+
+Sim, se não houver idempotência. O timeout não significa que a cobrança
+falhou; significa apenas que a resposta não foi recebida.
+
+Medidas preventivas:
+- Gere uma Idempotency-Key (UUID) por intenção de pagamento e reutilize a
+	mesma chave em todas as tentativas. Gateways como Stripe e Adyen oferecem
+	suporte à idempotência.
+- Use retry com backoff exponencial, jitter e um limite de tentativas.
+- Antes de repetir uma solicitação após timeout, consulte o status da
+	transação no gateway.
+
+
+2. INDISPONIBILIDADE DO BANCO DE DADOS
+--------------------------------------
+
+Pergunta: “E se o banco de dados cair na hora de registrar o estado de falha?”
+
+O dinheiro pode ter sido movimentado, ou não, sem que o resultado tenha sido
+registrado localmente. Isso deixa o estado da operação inconsistente.
+
+Medidas preventivas:
+- Use o Outbox Pattern: grave a intenção e o evento na mesma transação local,
+	antes de chamar o gateway.
+- Modele estados explícitos: PENDING → PROCESSING → APPROVED / FAILED / UNKNOWN.
+	Nunca assuma falha quando o resultado é desconhecido.
+- Execute um job de reconciliação que compare periodicamente os registros
+	locais com o extrato do gateway e corrija as operações pendentes.
+
+
+3. ENTREGA DE WEBHOOKS
+----------------------
+
+Pergunta: “E se o webhook de confirmação chegar duplicado, fora de ordem ou
+nunca chegar?”
+
+Webhooks seguem, em geral, o modelo at-least-once e não garantem a ordem de
+entrega.
+
+Medidas preventivas:
+- Deduplicate os eventos pelo event_id, armazenado em uma tabela com constraint
+	única.
+- Valide cada transição de estado. Por exemplo, um evento PENDING não deve
+	sobrescrever uma operação já APPROVED.
+- Verifique a assinatura HMAC do webhook.
+- Não dependa exclusivamente dos webhooks: use polling e reconciliação como
+	mecanismo de fallback.
